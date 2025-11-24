@@ -1,0 +1,5 @@
+{
+  "name": "PingisRank",
+  "description": "En app för att hantera rankinglistor i pingis, utmana spelare och registrera matchresultat med AI-kommentarer.",
+  "requestFramePermissions": []
+}
