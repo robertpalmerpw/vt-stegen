@@ -23,8 +23,11 @@ export const useAdmin = () => {
  }, []);
 
  const verifyPassword = (password: string): boolean => {
- // Enkelt lösenord för demonstration
- if (password === 'pingis123' || password === 'admin') {
+ const correctPassword = import.meta.env.VITE_ADMIN_PASSWORD;
+
+ // Kontrollera att lösenordet matchar miljövariabeln
+ // Vi kollar även att env-variabeln existerar
+ if (correctPassword && password === correctPassword) {
  localStorage.setItem(ADMIN_KEY, 'true');
  window.dispatchEvent(new Event('admin-auth-change'));
  return true;
