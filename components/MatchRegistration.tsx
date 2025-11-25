@@ -60,7 +60,7 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
           <Swords className="w-6 h-6 text-emerald-600" />
           Match Center
         </h2>
-        <p className="text-sm text-slate-500">Registrera resultatet från matchen</p>
+        <p className="text-sm text-slate-500">Du kan bara registrera matcher med spelare inom 2 placeringar från din egen.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
