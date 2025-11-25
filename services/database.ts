@@ -1,113 +1,182 @@
-import { Player, Match } from '../types';
-import { firestore } from './firebaseConfig';
-import {
- collection,
- getDocs,
- setDoc,
- doc,
- deleteDoc,
- writeBatch,
- query,
- orderBy
+import { initializeApp } from "firebase/app";
+import { 
+ getFirestore, 
+ collection, 
+ getDocs, 
+ addDoc, 
+ deleteDoc, 
+ doc, 
+ updateDoc, 
+ query, 
+ orderBy, 
+ limit, 
+ Timestamp, 
+ getDoc,
+ writeBatch
 } from 'firebase/firestore';
+import { firebaseConfig } from './firebaseConfig';
+import { Player, Match } from '../types';
 
-export const isConfigured = true;
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app);
 
-// Namn på kollektionerna i Firestore
-const PLAYERS_COL = 'players';
-const MATCHES_COL = 'matches';
+const PLAYERS_COLLECTION = 'players';
+const MATCHES_COLLECTION = 'matches';
 
-export const db = {
- getPlayers: async (): Promise<Player[]> => {
- try {
- const snapshot = await getDocs(collection(firestore, PLAYERS_COL));
- const players: Player[] = [];
- snapshot.forEach((doc) => {
- players.push(doc.data() as Player);
+// K-factor determines how much ratings change. 32 is common for casual leagues.
+const K_FACTOR = 32;
+
+export const getPlayers = async (): Promise<Player[]> => {
+ const q = query(collection(db, PLAYERS_COLLECTION), orderBy('rank', 'asc'));
+ const querySnapshot = await getDocs(q);
+ return querySnapshot.docs.map(doc => {
+ const data = doc.data();
+ return {
+ id: doc.id,
+ ...data,
+ // Default legacy players to 1200 ELO if missing
+ elo: data.elo || 1200,
+ joinedAt: data.joinedAt instanceof Timestamp ? data.joinedAt.toDate() : new Date(data.joinedAt || Date.now())
+ } as Player;
  });
- return players;
- } catch (e) {
- console.error("Fel vid hämtning av spelare:", e);
- return [];
- }
- },
+};
 
- getMatches: async (): Promise<Match[]> => {
- try {
- // Hämta matcher sorterade på datum (nyast först)
- const q = query(collection(firestore, MATCHES_COL), orderBy('date', 'desc'));
- const snapshot = await getDocs(q);
- const matches: Match[] = [];
- snapshot.forEach((doc) => {
- matches.push(doc.data() as Match);
+export const getMatches = async (): Promise<Match[]> => {
+ const q = query(collection(db, MATCHES_COLLECTION), orderBy('date', 'desc'), limit(50));
+ const querySnapshot = await getDocs(q);
+ return querySnapshot.docs.map(doc => {
+ const data = doc.data();
+ return {
+ id: doc.id,
+ ...data,
+ date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date)
+ } as Match;
  });
- return matches;
- } catch (e) {
- console.error("Fel vid hämtning av matcher:", e);
- return [];
- }
- },
+};
 
- addPlayer: async (player: Player): Promise<void> => {
- try {
- // Vi använder setDoc med player.id som dokument-ID för att ha kontroll över ID:t
- await setDoc(doc(firestore, PLAYERS_COL, player.id), player);
- } catch (e) {
- console.error("Fel vid tillägg av spelare:", e);
- throw e;
- }
- },
+export const addPlayer = async (name: string): Promise<Player> => {
+ // Get current count to determine rank (put at bottom)
+ const players = await getPlayers();
+ const newRank = players.length + 1;
 
- deletePlayer: async (playerId: string): Promise<void> => {
- try {
- await deleteDoc(doc(firestore, PLAYERS_COL, playerId));
- } catch (e) {
- console.error("Fel vid borttagning av spelare:", e);
- throw e;
- }
- },
-
- updatePlayers: async (players: Player[]): Promise<void> => {
- try {
- // Batch-uppdatering är effektivare när flera dokument ska ändras samtidigt
- const batch = writeBatch(firestore);
- players.forEach((player) => {
- const ref = doc(firestore, PLAYERS_COL, player.id);
- batch.set(ref, player, { merge: true });
- });
- await batch.commit();
- } catch (e) {
- console.error("Fel vid uppdatering av spelare:", e);
- throw e;
- }
- },
-
- addMatch: async (match: Match): Promise<void> => {
- try {
- await setDoc(doc(firestore, MATCHES_COL, match.id), match);
- } catch (e) {
- console.error("Fel vid registrering av match:", e);
- throw e;
- }
- },
-
- resetDatabase: async (): Promise<void> => {
- if (window.confirm("Detta rensar all data permanent från databasen. Är du säker?")) {
- try {
- const batch = writeBatch(firestore);
+ const newPlayer = {
+ name,
+ rank: newRank,
+ elo: 1200, // Starting ELO
+ wins: 0,
+ losses: 0,
+ streak: 0,
+ joinedAt: new Date()
+ };
  
- const playersSnapshot = await getDocs(collection(firestore, PLAYERS_COL));
- playersSnapshot.forEach((d) => batch.delete(d.ref));
+ const docRef = await addDoc(collection(db, PLAYERS_COLLECTION), newPlayer);
+ return { id: docRef.id, ...newPlayer } as Player;
+};
 
- const matchesSnapshot = await getDocs(collection(firestore, MATCHES_COL));
- matchesSnapshot.forEach((d) => batch.delete(d.ref));
+export const removePlayer = async (id: string): Promise<void> => {
+ await deleteDoc(doc(db, PLAYERS_COLLECTION, id));
+ // Note: Ideally we should shift ranks of other players here, 
+ // but it will self-correct on next match calculation.
+};
+
+export const removeMatch = async (id: string): Promise<void> => {
+ await deleteDoc(doc(db, MATCHES_COLLECTION, id));
+ // Removing a match is complex with ELO. 
+ // For simplicity in this version, we delete the record but don't revert ELO changes 
+ // to avoid cascading recalculation issues.
+};
+
+// Calculate expected score based on ELO
+const getExpectedScore = (ratingA: number, ratingB: number): number => {
+ return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
+};
+
+export const addMatch = async (matchData: Omit<Match, 'id' | 'date'>): Promise<string> => {
+ const winnerRef = doc(db, PLAYERS_COLLECTION, matchData.winnerId);
+ const loserRef = doc(db, PLAYERS_COLLECTION, matchData.loserId);
+
+ const [winnerSnap, loserSnap] = await Promise.all([getDoc(winnerRef), getDoc(loserRef)]);
+ 
+ if (!winnerSnap.exists() || !loserSnap.exists()) {
+ throw new Error("Players not found");
+ }
+
+ const winnerData = winnerSnap.data() as Player;
+ const loserData = loserSnap.data() as Player;
+
+ // Ensure ELO exists (migration fallback)
+ const winnerElo = winnerData.elo || 1200;
+ const loserElo = loserData.elo || 1200;
+
+ // Calculate ELO change
+ const expectedWinner = getExpectedScore(winnerElo, loserElo);
+ const eloChange = Math.round(K_FACTOR * (1 - expectedWinner));
+
+ const newWinnerElo = winnerElo + eloChange;
+ const newLoserElo = loserElo - eloChange;
+
+ // Determine streak
+ const newWinnerStreak = winnerData.streak > 0 ? winnerData.streak + 1 : 1;
+ const newLoserStreak = loserData.streak < 0 ? loserData.streak - 1 : -1;
+
+ // 1. Save the Match
+ const matchDocRef = await addDoc(collection(db, MATCHES_COLLECTION), {
+ ...matchData,
+ eloChange,
+ date: new Date(),
+ isRankSwap: winnerData.rank > loserData.rank // Legacy flag, still useful for UI
+ });
+
+ // 2. Update the two players involved
+ const batch = writeBatch(db);
+
+ batch.update(winnerRef, {
+ elo: newWinnerElo,
+ wins: winnerData.wins + 1,
+ streak: newWinnerStreak
+ });
+
+ batch.update(loserRef, {
+ elo: newLoserElo,
+ losses: loserData.losses + 1,
+ streak: newLoserStreak
+ });
 
  await batch.commit();
- window.location.reload();
- } catch (e) {
- console.error("Kunde inte återställa databasen:", e);
- alert("Ett fel uppstod vid återställning.");
+
+ // 3. Recalculate Ranks for EVERYONE
+ // This ensures the "within 2 places" rule always works on fresh data
+ await recalculateAllRanks();
+
+ return matchDocRef.id;
+};
+
+// Helper to sort all players by ELO and update their rank field
+const recalculateAllRanks = async () => {
+ const allPlayers = await getPlayers();
+ 
+ // Sort by ELO descending
+ allPlayers.sort((a, b) => b.elo - a.elo);
+
+ const batch = writeBatch(db);
+ let hasUpdates = false;
+
+ allPlayers.forEach((player, index) => {
+ const newRank = index + 1;
+ if (player.rank !== newRank) {
+ const playerRef = doc(db, PLAYERS_COLLECTION, player.id);
+ batch.update(playerRef, { rank: newRank });
+ hasUpdates = true;
  }
+ });
+
+ if (hasUpdates) {
+ await batch.commit();
  }
- }
+};
+
+export const updatePlayer = async (id: string, data: Partial<Player>): Promise<void> => {
+ const playerRef = doc(db, PLAYERS_COLLECTION, id);
+ await updateDoc(playerRef, data);
 };

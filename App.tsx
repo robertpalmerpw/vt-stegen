@@ -1,231 +1,227 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { RankingList } from './components/RankingList';
 import { MatchRegistration } from './components/MatchRegistration';
-import { AddPlayer } from './components/AddPlayer';
 import { MatchHistory } from './components/MatchHistory';
+import { AddPlayer } from './components/AddPlayer';
 import { SetupGuide } from './components/SetupGuide';
+import { AdminLogin } from './components/AdminLogin';
+import { useAdmin } from './hooks/useAdmin';
+import { getPlayers, getMatches, addMatch, removePlayer, removeMatch, updatePlayer, addPlayer } from './services/database';
 import { Player, Match } from './types';
 import { generateMatchCommentary } from './services/geminiService';
-import { db, isConfigured } from './services/database';
-import { Activity, RefreshCw, Cloud } from 'lucide-react';
+import { Trophy, Loader2, Lock, Unlock } from 'lucide-react';
 
-const App: React.FC = () => {
+function App() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [registering, setRegistering] = useState(false);
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const { isAdmin } = useAdmin();
 
-  // Load data from database on mount
-  useEffect(() => {
-    if (!isConfigured) {
-      setIsLoadingData(false);
-      return;
+  const refreshData = useCallback(async () => {
+    try {
+      const [fetchedPlayers, fetchedMatches] = await Promise.all([
+        getPlayers(),
+        getMatches()
+      ]);
+      // Sortera spelare baserat på rank (lägst rank är bäst)
+      setPlayers(fetchedPlayers.sort((a, b) => a.rank - b.rank));
+      setMatches(fetchedMatches);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    } finally {
+      setLoading(false);
     }
-
-    const loadData = async () => {
-      setIsLoadingData(true);
-      try {
-        const [loadedPlayers, loadedMatches] = await Promise.all([
-          db.getPlayers(),
-          db.getMatches()
-        ]);
-        // Ensure sorted by rank
-        setPlayers(loadedPlayers.sort((a, b) => a.rank - b.rank));
-        setMatches(loadedMatches);
-      } catch (error) {
-        console.error("Failed to load data from database:", error);
-      } finally {
-        setIsLoadingData(false);
-      }
-    };
-    loadData();
   }, []);
 
-  const handleAddPlayer = async (name: string) => {
-    const newPlayer: Player = {
-      id: Date.now().toString(),
-      name,
-      rank: players.length + 1,
-      wins: 0,
-      losses: 0,
-      streak: 0,
-    };
-    
-    const newPlayers = [...players, newPlayer].sort((a, b) => a.rank - b.rank);
-    setPlayers(newPlayers);
-    
-    // Save only the new player to DB
-    await db.addPlayer(newPlayer);
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+
+  const handleRegisterMatch = async (winnerId: string, loserId: string, winnerScore: number, loserScore: number) => {
+    setRegistering(true);
+    try {
+      const winner = players.find(p => p.id === winnerId);
+      const loser = players.find(p => p.id === loserId);
+      
+      if (!winner || !loser) return;
+
+      let isRankSwap = false;
+      if (winner.rank > loser.rank) {
+        const oldWinnerRank = winner.rank;
+        const oldLoserRank = loser.rank;
+        
+        await updatePlayer(winner.id, { rank: oldLoserRank });
+        await updatePlayer(loser.id, { rank: oldWinnerRank });
+        isRankSwap = true;
+      }
+
+      await updatePlayer(winner.id, {
+        wins: winner.wins + 1,
+        streak: winner.streak > 0 ? winner.streak + 1 : 1
+      });
+
+      await updatePlayer(loser.id, {
+        losses: loser.losses + 1,
+        streak: loser.streak < 0 ? loser.streak - 1 : -1
+      });
+
+      let aiCommentary = undefined;
+      try {
+        aiCommentary = await generateMatchCommentary(winner.name, loser.name, winnerScore, loserScore, isRankSwap);
+      } catch (e) {
+        console.warn("Kunde inte hämta AI-kommentar");
+      }
+
+      await addMatch({
+        winnerId, winnerName: winner.name,
+        loserId, loserName: loser.name,
+        winnerScore, loserScore,
+        date: new Date(),
+        isRankSwap,
+        aiCommentary
+      });
+
+      await refreshData();
+    } catch (error) {
+      console.error("Kunde inte registrera match:", error);
+      alert("Ett fel uppstod vid matchregistrering.");
+    } finally {
+      setRegistering(false);
+    }
   };
 
   const handleRemovePlayer = async (id: string) => {
-    const filtered = players.filter(p => p.id !== id);
-    // Re-calculate ranks after removal to avoid gaps
-    const newPlayers = filtered.map((p, index) => ({
-      ...p,
-      rank: index + 1
-    }));
-    
-    setPlayers(newPlayers);
-    
-    // Delete the player and update the rest (re-ranking)
-    await db.deletePlayer(id);
-    await db.updatePlayers(newPlayers);
-  };
-
-  const handleRegisterMatch = async (winnerId: string, loserId: string, winnerScore: number, loserScore: number) => {
-    setIsProcessing(true);
-    
     try {
-      const winner = players.find(p => p.id === winnerId)!;
-      const loser = players.find(p => p.id === loserId)!;
-      
-      // LOGIC: Swap ranks if lower ranked player (higher rank number) beats higher ranked player
-      let isRankSwap = false;
-      let newPlayers = [...players];
-
-      if (winner.rank > loser.rank) {
-        isRankSwap = true;
-        // Swap ranks
-        newPlayers = newPlayers.map(p => {
-          if (p.id === winnerId) return { ...p, rank: loser.rank };
-          if (p.id === loserId) return { ...p, rank: winner.rank };
-          return p;
-        });
-      }
-
-      // Update stats (wins/losses/streak)
-      newPlayers = newPlayers.map(p => {
-        if (p.id === winnerId) {
-          return { 
-            ...p, 
-            wins: p.wins + 1, 
-            streak: p.streak > 0 ? p.streak + 1 : 1 
-          };
-        }
-        if (p.id === loserId) {
-          return { 
-            ...p, 
-            losses: p.losses + 1, 
-            streak: p.streak < 0 ? p.streak - 1 : -1 
-          };
-        }
-        return p;
-      });
-
-      // Sort by rank again
-      newPlayers.sort((a, b) => a.rank - b.rank);
-      setPlayers(newPlayers);
-      
-      // Generate AI Commentary
-      const commentary = await generateMatchCommentary(
-        winner.name, 
-        loser.name, 
-        winnerScore, 
-        loserScore, 
-        isRankSwap
-      );
-
-      const newMatch: Match = {
-        id: Date.now().toString(),
-        winnerId,
-        loserId,
-        winnerScore,
-        loserScore,
-        winnerName: winner.name,
-        loserName: loser.name,
-        date: new Date().toISOString(),
-        isRankSwap,
-        aiCommentary: commentary
-      };
-
-      const newMatches = [newMatch, ...matches];
-      setMatches(newMatches);
-      
-      // Save updates to DB: Add match and update affected players
-      await Promise.all([
-        db.addMatch(newMatch),
-        db.updatePlayers(newPlayers)
-      ]);
-
+      await removePlayer(id);
+      await refreshData();
     } catch (error) {
-      console.error("Error registering match:", error);
-      alert("Ett fel uppstod när matchen skulle sparas.");
-    } finally {
-      setIsProcessing(false);
+      console.error("Kunde inte ta bort spelare:", error);
+      alert("Kunde inte ta bort spelare.");
     }
   };
 
-  // Check configuration state before rendering main app
-  if (!isConfigured) {
-    return <SetupGuide />;
-  }
+  const handleRemoveMatch = async (id: string) => {
+    try {
+      await removeMatch(id);
+      await refreshData();
+    } catch (error) {
+      console.error("Kunde inte ta bort match:", error);
+      alert("Kunde inte ta bort match.");
+    }
+  };
 
-  if (isLoadingData) {
+  const handleAddPlayer = async (name: string) => {
+    try {
+      await addPlayer(name);
+      await refreshData();
+    } catch (error) {
+      console.error("Error adding player:", error);
+    }
+  };
+
+  if (loading) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-emerald-600 animate-spin mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-slate-700">Hämtar data...</h2>
-          <p className="text-sm text-slate-400 mt-2">Läser från lokal lagring...</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
+          <p className="text-slate-400 font-medium animate-pulse">Laddar ligan...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 pb-20 flex flex-col">
-      <header className="bg-slate-900 text-white shadow-md sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+    <div className="min-h-screen pb-24">
+      <header className="fixed top-0 inset-x-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <div className="bg-emerald-500 p-2 rounded-lg">
-               <Activity className="w-6 h-6 text-white" />
+            <div className="relative">
+              <div className="w-9 h-9 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/30 rotate-3 transition-transform hover:rotate-6">
+                <Trophy className="w-5 h-5 text-white" />
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full border-2 border-white"></div>
             </div>
             <div>
-               <h1 className="text-xl font-bold tracking-tight">PingisRank</h1>
-               <p className="text-xs text-slate-400 font-medium">Kontorets Officiella Ranking</p>
+              <h1 className="font-bold text-slate-800 text-lg leading-tight tracking-tight">VT-Stegen</h1>
+              <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Official Ranking</p>
             </div>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {isAdmin ? (
+              <button 
+                className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors"
+                onClick={() => setIsLoginOpen(true)} 
+              >
+                <Unlock className="w-3 h-3" />
+                Admin
+              </button>
+            ) : (
+              <button 
+                onClick={() => setIsLoginOpen(true)}
+                className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                title="Logga in som admin"
+              >
+                <Lock className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8 flex-grow">
-        {/* Left Column: Ranking List */}
-        <div className="lg:col-span-2 space-y-6">
-          <RankingList 
-            players={players} 
-            onRemovePlayer={handleRemovePlayer} 
-          />
-          <MatchHistory matches={matches} />
-        </div>
+      <AdminLogin 
+        isOpen={isLoginOpen} 
+        onClose={() => setIsLoginOpen(false)} 
+      />
 
-        {/* Right Column: Actions */}
-        <div className="space-y-6">
-          <MatchRegistration 
-            players={players} 
-            onRegisterMatch={handleRegisterMatch} 
-            isSubmitting={isProcessing}
-          />
-          <AddPlayer onAddPlayer={handleAddPlayer} />
-        </div>
+      <main className="max-w-7xl mx-auto px-4 py-8 mt-16">
+        
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fade-in">
+            <div className="lg:col-span-8 space-y-8">
+              <section>
+                <RankingList 
+                  players={players} 
+                  matches={matches}
+                  onRemovePlayer={handleRemovePlayer} 
+                />
+              </section>
+            </div>
+            
+            <div className="lg:col-span-4 space-y-6">
+              <div className="sticky top-24 space-y-6">
+                <section>
+                  <MatchRegistration 
+                    players={players} 
+                    onRegisterMatch={handleRegisterMatch}
+                    isSubmitting={registering}
+                  />
+                </section>
+
+                {isAdmin && (
+                  <section className="bg-slate-50 border border-slate-200 border-dashed rounded-xl p-4">
+                    <AddPlayer onAddPlayer={handleAddPlayer} />
+                  </section>
+                )}
+
+                <section>
+                  <MatchHistory 
+                    matches={matches} 
+                    onRemoveMatch={handleRemoveMatch}
+                  />
+                </section>
+              </div>
+            </div>
+          </div>
+        
       </main>
 
-      <footer className="bg-slate-200 py-6 border-t border-slate-300">
-        <div className="max-w-6xl mx-auto px-4 flex justify-between items-center text-slate-500 text-sm">
-          <div className="flex items-center gap-2 text-slate-600 font-medium">
-            <Cloud className="w-4 h-4 text-slate-400" />
-            <span>Sparat lokalt i webbläsaren</span>
-          </div>
-          <button 
-            onClick={() => db.resetDatabase()}
-            className="text-xs hover:text-red-600 transition-colors"
-          >
-            Återställ data
-          </button>
-        </div>
+      <footer className="py-8 text-center text-slate-400 text-sm">
+        <p>© 2025 Pingisligan</p>
       </footer>
     </div>
   );
-};
+}
 
 export default App;
