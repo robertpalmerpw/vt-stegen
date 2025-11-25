@@ -1,25 +1,39 @@
 import React, { useState } from 'react';
 import { Button } from './Button';
-import { UserPlus, Lock, LogOut, ShieldCheck } from 'lucide-react';
+import { UserPlus, Lock, LogOut, ShieldCheck, Zap } from 'lucide-react';
 import { useAdmin } from '../hooks/useAdmin';
 import { AdminLogin } from './AdminLogin';
+import { addPlayer } from '../services/database';
 
 interface AddPlayerProps {
- onAddPlayer: (name: string) => void;
+ onPlayerAdded: () => void;
 }
 
-export const AddPlayer: React.FC<AddPlayerProps> = ({ onAddPlayer }) => {
+export const AddPlayer: React.FC<AddPlayerProps> = ({ onPlayerAdded }) => {
  const [name, setName] = useState('');
+ const [startElo, setStartElo] = useState('1200');
  const [isExpanded, setIsExpanded] = useState(false);
  const [showLogin, setShowLogin] = useState(false);
+ const [isSubmitting, setIsSubmitting] = useState(false);
  const { isAdmin, logout } = useAdmin();
 
- const handleSubmit = (e: React.FormEvent) => {
+ const handleSubmit = async (e: React.FormEvent) => {
  e.preventDefault();
- if (name.trim()) {
- onAddPlayer(name.trim());
+ if (name.trim() && !isSubmitting) {
+ setIsSubmitting(true);
+ try {
+ const elo = parseInt(startElo) || 1200;
+ await addPlayer(name.trim(), elo);
+ onPlayerAdded();
  setName('');
+ setStartElo('1200');
  setIsExpanded(false);
+ } catch (error) {
+ console.error("Fel vid skapande av spelare:", error);
+ alert("Kunde inte skapa spelare. Försök igen.");
+ } finally {
+ setIsSubmitting(false);
+ }
  }
  };
 
@@ -93,17 +107,34 @@ export const AddPlayer: React.FC<AddPlayerProps> = ({ onAddPlayer }) => {
  className="w-full rounded-lg border-slate-300 border p-3 pl-10 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
  autoFocus
  required
+ disabled={isSubmitting}
  />
  <UserPlus className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
  </div>
- <Button variant="secondary" type="submit" className="w-full">
- Lägg till i ligan
+
+ <div className="relative">
+ <input
+ type="number"
+ value={startElo}
+ onChange={(e) => setStartElo(e.target.value)}
+ placeholder="Startpoäng (t.ex. 1200)"
+ className="w-full rounded-lg border-slate-300 border p-3 pl-10 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+ required
+ min="0"
+ step="10"
+ disabled={isSubmitting}
+ />
+ <Zap className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+ </div>
+
+ <Button variant="secondary" type="submit" className="w-full" disabled={isSubmitting}>
+ {isSubmitting ? 'Sparar...' : 'Lägg till i ligan'}
  </Button>
  </form>
  
  <div className="flex justify-between items-center mt-4 border-t border-slate-100 pt-3">
  <p className="text-xs text-slate-400">
- Börjar längst ner i rankingen
+ Startar med angiven ELO
  </p>
  <button 
  onClick={logout}

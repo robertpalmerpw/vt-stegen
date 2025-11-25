@@ -6,9 +6,10 @@ import { AddPlayer } from './components/AddPlayer';
 import { SetupGuide } from './components/SetupGuide';
 import { AdminLogin } from './components/AdminLogin';
 import { useAdmin } from './hooks/useAdmin';
-import { getPlayers, getMatches, addMatch, removePlayer, removeMatch, updatePlayer, addPlayer, recalculateAllRanks } from './services/database';
+import { getPlayers, getMatches, addMatch, removePlayer, removeMatch, updatePlayer, recalculateAllRanks } from './services/database';
 import { Player, Match } from './types';
 import { Trophy, Loader2, Lock, Unlock, LogOut } from 'lucide-react';
+import { DataSeeder } from './components/DataSeeder';
 
 function App() {
  const [players, setPlayers] = useState<Player[]>([]);
@@ -148,15 +149,6 @@ function App() {
  }
  };
 
- const handleAddPlayer = async (name: string) => {
- try {
- await addPlayer(name);
- await refreshData();
- } catch (error) {
- console.error("Error adding player:", error);
- }
- };
-
  if (!isAuthenticated) {
  return (
  <AdminLogin 
@@ -252,7 +244,7 @@ function App() {
 
  {isAdmin && (
  <section className="bg-slate-50 border border-slate-200 border-dashed rounded-xl p-4">
- <AddPlayer onAddPlayer={handleAddPlayer} />
+ <AddPlayer onPlayerAdded={refreshData} />
  </section>
  )}
 
@@ -270,6 +262,7 @@ function App() {
  <footer className="py-8 text-center text-slate-400 text-sm">
  <p>© 2025-2026 VT-Stegen - vid tekniska problem maila robert.palmer@vasttrafik.se</p>
  </footer>
+
  </div>
  );
 }

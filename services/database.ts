@@ -54,14 +54,14 @@ export const getMatches = async (): Promise<Match[]> => {
  });
 };
 
-export const addPlayer = async (name: string): Promise<Player> => {
+export const addPlayer = async (name: string, initialElo: number = 1200): Promise<Player> => {
  const players = await getPlayers();
  const newRank = players.length + 1;
 
  const newPlayer = {
  name,
  rank: newRank,
- elo: 1200,
+ elo: initialElo,
  wins: 0,
  losses: 0,
  streak: 0,
@@ -115,17 +115,17 @@ export const addMatch = async (matchData: Omit<Match, 'id' | 'date'>): Promise<s
 
  // Generera AI-kommentar INNAN vi sparar, så den visas direkt i UI
  const aiCommentary = await generateMatchCommentary(
-   winnerData.name,
-   loserData.name,
-   matchData.winnerScore,
-   matchData.loserScore,
-   false,
-   {
-     winnerStreak: newWinnerStreak,
-     loserStreak: newLoserStreak,
-     winnerWinRate,
-     loserWinRate
-   }
+ winnerData.name,
+ loserData.name,
+ matchData.winnerScore,
+ matchData.loserScore,
+ false,
+ {
+ winnerStreak: newWinnerStreak,
+ loserStreak: newLoserStreak,
+ winnerWinRate,
+ loserWinRate
+ }
  );
 
  // Skapa dokumentet med kommentaren
