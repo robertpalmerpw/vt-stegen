@@ -66,17 +66,18 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
             <Trophy className="w-5 h-5 text-emerald-500" />
             Tabell
           </h2>
-          <p className="text-xs text-slate-500 mt-1 font-medium"></p>
+          <p className="text-xs text-slate-500 mt-1 font-medium">Rankad efter ELO</p>
         </div>
       </div>
 
       <div className="divide-y divide-slate-50">
-        {[...players].sort((a, b) => (b.elo || 1200) - (a.elo || 1200)).map((player, index) => {
+        {[...players].sort((a, b) => b.elo - a.elo).map((player, index) => {
           const totalGames = player.wins + player.losses;
           const winRate = totalGames > 0 ? Math.round((player.wins / totalGames) * 100) : 0;
           const isExpanded = expandedId === player.id;
           const lastMatchDate = getLastMatchDate(player.id);
           const recentMatches = isExpanded ? getPlayerMatches(player.id).slice(0, 5) : [];
+          const currentRank = index + 1;
 
           return (
             <div key={player.id} className="transition-colors group">
@@ -85,7 +86,7 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
                 className={`p-4 flex items-center gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
               >
                 <div className="flex-shrink-0">
-                  {getRankBadge(index + 1)}
+                  {getRankBadge(currentRank)}
                 </div>
                 
                 <img 
@@ -153,7 +154,6 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
                 )}
               </div>
 
-              {/* Expanded Match History */}
               {isExpanded && (
                 <div className="bg-slate-50 px-4 pb-4 pt-0 animate-in slide-in-from-top-2 duration-200">
                   <div className="pl-[4.5rem]">
@@ -170,8 +170,6 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
                           const opponent = players.find(p => p.id === opponentId);
                           const opponentName = opponent ? opponent.name : 'Okänd spelare';
                           
-                          // ELO diff (visas om det finns i match-objektet)
-                          // Antar att match.eloChange finns
                           const eloDiff = match.eloChange ? (isWinner ? `+${match.eloChange}` : `-${match.eloChange}`) : null;
                           const playerScore = isWinner ? match.winnerScore : match.loserScore;
                           const opponentScore = isWinner ? match.loserScore : match.winnerScore;

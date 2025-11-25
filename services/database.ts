@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { firebaseConfig } from './firebaseConfig';
 import { Player, Match } from '../types';
+import { generateMatchCommentary } from './geminiService';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -24,18 +25,16 @@ export const db = getFirestore(app);
 const PLAYERS_COLLECTION = 'players';
 const MATCHES_COLLECTION = 'matches';
 
-// K-factor determines how much ratings change. 32 is common for casual leagues.
 const K_FACTOR = 32;
 
 export const getPlayers = async (): Promise<Player[]> => {
- const q = query(collection(db, PLAYERS_COLLECTION), orderBy('rank', 'asc'));
+ const q = query(collection(db, PLAYERS_COLLECTION), orderBy('elo', 'desc'));
  const querySnapshot = await getDocs(q);
  return querySnapshot.docs.map(doc => {
  const data = doc.data();
  return {
  id: doc.id,
  ...data,
- // Default legacy players to 1200 ELO if missing
  elo: data.elo || 1200,
  joinedAt: data.joinedAt instanceof Timestamp ? data.joinedAt.toDate() : new Date(data.joinedAt || Date.now())
  } as Player;
@@ -56,14 +55,13 @@ export const getMatches = async (): Promise<Match[]> => {
 };
 
 export const addPlayer = async (name: string): Promise<Player> => {
- // Get current count to determine rank (put at bottom)
  const players = await getPlayers();
  const newRank = players.length + 1;
 
  const newPlayer = {
  name,
  rank: newRank,
- elo: 1200, // Starting ELO
+ elo: 1200,
  wins: 0,
  losses: 0,
  streak: 0,
@@ -76,18 +74,13 @@ export const addPlayer = async (name: string): Promise<Player> => {
 
 export const removePlayer = async (id: string): Promise<void> => {
  await deleteDoc(doc(db, PLAYERS_COLLECTION, id));
- // Note: Ideally we should shift ranks of other players here, 
- // but it will self-correct on next match calculation.
+ await recalculateAllRanks();
 };
 
 export const removeMatch = async (id: string): Promise<void> => {
  await deleteDoc(doc(db, MATCHES_COLLECTION, id));
- // Removing a match is complex with ELO. 
- // For simplicity in this version, we delete the record but don't revert ELO changes 
- // to avoid cascading recalculation issues.
 };
 
-// Calculate expected score based on ELO
 const getExpectedScore = (ratingA: number, ratingB: number): number => {
  return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
 };
@@ -105,30 +98,45 @@ export const addMatch = async (matchData: Omit<Match, 'id' | 'date'>): Promise<s
  const winnerData = winnerSnap.data() as Player;
  const loserData = loserSnap.data() as Player;
 
- // Ensure ELO exists (migration fallback)
  const winnerElo = winnerData.elo || 1200;
  const loserElo = loserData.elo || 1200;
 
- // Calculate ELO change
  const expectedWinner = getExpectedScore(winnerElo, loserElo);
  const eloChange = Math.round(K_FACTOR * (1 - expectedWinner));
 
  const newWinnerElo = winnerElo + eloChange;
  const newLoserElo = loserElo - eloChange;
 
- // Determine streak
  const newWinnerStreak = winnerData.streak > 0 ? winnerData.streak + 1 : 1;
  const newLoserStreak = loserData.streak < 0 ? loserData.streak - 1 : -1;
 
- // 1. Save the Match
+ const winnerWinRate = Math.round(((winnerData.wins + 1) / (winnerData.wins + winnerData.losses + 1)) * 100);
+ const loserWinRate = Math.round((loserData.wins / (loserData.wins + loserData.losses + 1)) * 100);
+
+ // Generera AI-kommentar INNAN vi sparar, så den visas direkt i UI
+ const aiCommentary = await generateMatchCommentary(
+   winnerData.name,
+   loserData.name,
+   matchData.winnerScore,
+   matchData.loserScore,
+   false,
+   {
+     winnerStreak: newWinnerStreak,
+     loserStreak: newLoserStreak,
+     winnerWinRate,
+     loserWinRate
+   }
+ );
+
+ // Skapa dokumentet med kommentaren
  const matchDocRef = await addDoc(collection(db, MATCHES_COLLECTION), {
- ...matchData,
+ ...matchData, 
  eloChange,
  date: new Date(),
- isRankSwap: winnerData.rank > loserData.rank // Legacy flag, still useful for UI
+ isRankSwap: false,
+ aiCommentary // Nu med data!
  });
 
- // 2. Update the two players involved
  const batch = writeBatch(db);
 
  batch.update(winnerRef, {
@@ -145,18 +153,16 @@ export const addMatch = async (matchData: Omit<Match, 'id' | 'date'>): Promise<s
 
  await batch.commit();
 
- // 3. Recalculate Ranks for EVERYONE
- // This ensures the "within 2 places" rule always works on fresh data
- await recalculateAllRanks();
+ // Kör endast rangordning i bakgrunden
+ recalculateAllRanks().catch(err => {
+ console.error("Bakgrundsjobb (ranking) fel:", err);
+ });
 
  return matchDocRef.id;
 };
 
-// Helper to sort all players by ELO and update their rank field
-const recalculateAllRanks = async () => {
+export const recalculateAllRanks = async () => {
  const allPlayers = await getPlayers();
- 
- // Sort by ELO descending
  allPlayers.sort((a, b) => b.elo - a.elo);
 
  const batch = writeBatch(db);

@@ -21,7 +21,6 @@ export const generateMatchCommentary = async (
     let contextInfo = "";
 
     if (context) {
-      // FIX: Lade till backticks (`) här
       const wStreak = context.winnerStreak
         ? (context.winnerStreak > 0 ? `${context.winnerStreak} raka vinster` : `${Math.abs(context.winnerStreak)} raka förluster`)
         : "okänd svit";
@@ -30,7 +29,6 @@ export const generateMatchCommentary = async (
         ? (context.loserStreak > 0 ? `${context.loserStreak} raka vinster` : `${Math.abs(context.loserStreak)} raka förluster`)
         : "okänd svit";
 
-      // FIX: Lade till backticks (`) här
       contextInfo = `
 Statistik och formkurva:
 - Vinnaren (${winnerName}): ${wStreak}, ${context.winnerWinRate ?? '?'}% win rate.
@@ -38,7 +36,6 @@ Statistik och formkurva:
 `;
     }
 
-    // FIX: Lade till backticks (`) runt hela prompten
     const prompt = `
 Du är en entusiastisk, humoristisk och lite kaxig sportkommentator för en pingisturnering på kontoret.
 Skriv en kort, kärnfull och rolig kommentar (max 2 meningar) på svenska om följande match.
@@ -57,12 +54,10 @@ Instruktioner:
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', // Ändrade från 2.5 (finns ej) till 1.5
-      contents: prompt, // @google/genai hanterar ofta rena strängar här
+      model: 'gemini-2.5-flash',
+      contents: prompt,
     });
 
-    // Beroende på exakt version av @google/genai kan texten ligga i .text() eller .text
-    // Om response.text inte fungerar, prova response.candidates[0].content.parts[0].text
     return response.text || "Vilken match! 🏓";
 
   } catch (error) {

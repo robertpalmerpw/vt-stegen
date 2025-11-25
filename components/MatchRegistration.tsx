@@ -16,21 +16,24 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
   const [score2, setScore2] = useState<string>('');
 
   const player1 = players.find(p => p.id === player1Id);
-  
+
   const sortedPlayers = useMemo(() => {
     return [...players].sort((a, b) => a.rank - b.rank);
   }, [players]);
 
   const eligibleOpponents = useMemo(() => {
     if (!player1) return [];
-    return players.filter(p => {
-      if (p.id === player1.id) return false;
-      const rankDiff = Math.abs(player1.rank - p.rank);
-      return rankDiff <= 2;
-    }).sort((a, b) => a.rank - b.rank);
+    
+    // Filtrera motståndare: Max 2 placeringar skillnad i rank
+    return players
+      .filter(p => {
+        if (p.id === player1.id) return false;
+        const rankDiff = Math.abs(p.rank - player1.rank);
+        return rankDiff <= 2;
+      })
+      .sort((a, b) => a.rank - b.rank);
   }, [player1, players]);
 
-  // Hanterar input: Tillåt bara siffror 0, 1, 2
   const handleScoreChange = (value: string, setter: (val: string) => void) => {
     if (value === '') {
       setter('');
@@ -42,37 +45,30 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
     }
   };
 
-  // --- NY VALIDERINGSLOGIK ---
-  // Vi räknar ut status för matchen live baserat på siffrorna
   const matchStatus = useMemo(() => {
-    // Om fälten är tomma
     if (score1 === '' || score2 === '') return { isValid: false, error: null };
 
     const s1 = parseInt(score1, 10);
     const s2 = parseInt(score2, 10);
 
-    // Scenario: 2-2 (Ogiltigt i bäst av 3)
     if (s1 === 2 && s2 === 2) {
-      return { 
-        isValid: false, 
-        error: '2-2 är inte möjligt i bäst av 3.' 
+      return {
+        isValid: false,
+        error: '2-2 är inte möjligt i bäst av 3.'
       };
     }
 
-    // Scenario: Ingen har nått 2 än (t.ex. 1-1, 1-0, 0-0)
     if (s1 < 2 && s2 < 2) {
-      return { 
-        isValid: false, 
-        error: null // Inget fel, men matchen är inte klar
+      return {
+        isValid: false,
+        error: null
       };
     }
 
-    // Scenario: Giltigt slutresultat (Någon har 2, den andra har mindre än 2)
-    // Eftersom vi redan kollat 2-2 ovan, så vet vi att om någon har 2 så har den andra 0 eller 1.
     if (s1 === 2 || s2 === 2) {
-      return { 
-        isValid: true, 
-        error: null 
+      return {
+        isValid: true,
+        error: null
       };
     }
 
@@ -81,8 +77,7 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Extra säkerhetscheck vid submit
+
     if (!matchStatus.isValid || !player1Id || !player2Id) return;
 
     const s1 = parseInt(score1, 10);
@@ -94,8 +89,7 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
     const loserId = s1 > s2 ? player2Id : player1Id;
 
     await onRegisterMatch(winnerId, loserId, winnerScore, loserScore);
-    
-    // Återställ
+
     setScore1('');
     setScore2('');
     setPlayer1Id('');
@@ -105,7 +99,7 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
   return (
     <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-6 sm:p-8 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-emerald-400 to-teal-500"></div>
-      
+
       <div className="mb-8 text-center">
         <h2 className="text-xl font-bold text-slate-800 flex items-center justify-center gap-2">
           <Swords className="w-6 h-6 text-emerald-600" />
@@ -126,7 +120,7 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
             >
               <option value="">Välj spelare</option>
               {sortedPlayers.map(p => (
-                <option key={p.id} value={p.id}>{p.name} (#{p.rank})</option>
+                <option key={p.id} value={p.id}>{p.name} (Rank {p.rank})</option>
               ))}
             </select>
           </div>
@@ -144,24 +138,28 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
             >
               <option value="">{!player1Id ? '-' : 'Välj motståndare'}</option>
               {eligibleOpponents.map(p => (
-                <option key={p.id} value={p.id}>{p.name} (#{p.rank})</option>
+                <option key={p.id} value={p.id}>{p.name} (Rank {p.rank})</option>
               ))}
             </select>
+            {player1Id && eligibleOpponents.length === 0 && (
+              <p className="text-xs text-center text-amber-500 mt-2 font-medium">
+                Inga spelare inom 2 placeringar.
+              </p>
+            )}
           </div>
         </div>
 
-        {/* Score Section */}
         <div className={`bg-slate-50/50 rounded-2xl p-6 border transition-colors duration-300 ${matchStatus.error ? 'border-red-200 bg-red-50/30' : matchStatus.isValid ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-100/50'}`}>
           <div className="text-center mb-4">
             <span className={`text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full transition-colors ${
-              matchStatus.error ? 'bg-red-100 text-red-600' : 
-              matchStatus.isValid ? 'bg-emerald-100 text-emerald-600' : 
+              matchStatus.error ? 'bg-red-100 text-red-600' :
+              matchStatus.isValid ? 'bg-emerald-100 text-emerald-600' :
               'bg-slate-200 text-slate-500'
             }`}>
               {matchStatus.error ? 'Ogiltigt' : matchStatus.isValid ? 'Giltigt Resultat' : 'Resultat (Bäst av 3 set)'}
             </span>
           </div>
-          
+
           <div className="flex items-center justify-center gap-8">
             <div className="w-24">
               <input
@@ -172,7 +170,7 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
                 placeholder="-"
                 onChange={(e) => handleScoreChange(e.target.value, setScore1)}
                 className={`w-full aspect-square text-center text-4xl sm:text-5xl font-black bg-white rounded-2xl border-2 outline-none transition-all shadow-sm placeholder:text-slate-200 text-slate-800 ${
-                  matchStatus.error ? 'border-red-300 focus:border-red-500' : 
+                  matchStatus.error ? 'border-red-300 focus:border-red-500' :
                   matchStatus.isValid ? 'border-emerald-400 focus:border-emerald-500 ring-4 ring-emerald-500/10' :
                   'border-slate-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10'
                 }`}
@@ -189,7 +187,7 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
                 placeholder="-"
                 onChange={(e) => handleScoreChange(e.target.value, setScore2)}
                 className={`w-full aspect-square text-center text-4xl sm:text-5xl font-black bg-white rounded-2xl border-2 outline-none transition-all shadow-sm placeholder:text-slate-200 text-slate-800 ${
-                  matchStatus.error ? 'border-red-300 focus:border-red-500' : 
+                  matchStatus.error ? 'border-red-300 focus:border-red-500' :
                   matchStatus.isValid ? 'border-emerald-400 focus:border-emerald-500 ring-4 ring-emerald-500/10' :
                   'border-slate-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10'
                 }`}
@@ -197,7 +195,7 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
               />
             </div>
           </div>
-          
+
           <div className="text-center mt-4 flex items-center justify-center min-h-[24px]">
             {matchStatus.error ? (
               <div className="flex items-center gap-2 text-red-500 animate-in fade-in slide-in-from-bottom-1 duration-300">
@@ -218,14 +216,13 @@ export const MatchRegistration: React.FC<MatchRegistrationProps> = ({ players, o
           </div>
         </div>
 
-        <Button 
-          type="submit" 
+        <Button
+          type="submit"
           className={`w-full py-4 text-lg font-bold shadow-lg transform transition-all active:scale-[0.98] ${
-            !matchStatus.isValid || !player1Id || !player2Id 
-              ? 'opacity-50 cursor-not-allowed bg-slate-300 shadow-none' 
+            !matchStatus.isValid || !player1Id || !player2Id
+              ? 'opacity-50 cursor-not-allowed bg-slate-300 shadow-none'
               : 'shadow-emerald-500/20 hover:shadow-emerald-500/30'
           }`}
-          // Knappen är avstängd om status INTE är valid (dvs även vid 2-2 eller 0-0)
           disabled={!matchStatus.isValid || !player1Id || !player2Id}
           isLoading={isSubmitting}
         >
