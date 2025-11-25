@@ -13,6 +13,9 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({ matches, onRemoveMat
 
  if (matches.length === 0) return null;
 
+ // Begränsa till max 10 matcher
+ const displayMatches = matches.slice(0, 10);
+
  return (
  <div className="space-y-4">
  <div className="flex items-center gap-2 px-2">
@@ -23,7 +26,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({ matches, onRemoveMat
  </div>
  
  <div className="grid grid-cols-1 gap-4">
- {matches.map((match) => (
+ {displayMatches.map((match) => (
  <div 
  key={match.id} 
  className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-all group relative"
