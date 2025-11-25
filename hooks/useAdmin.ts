@@ -1,44 +1,61 @@
 import { useState, useEffect } from 'react';
 
-const ADMIN_KEY = 'pingis_admin_auth';
+const AUTH_KEY = 'pingis_auth_level'; // 'admin' | 'user' | null
 
 export const useAdmin = () => {
- const [isAdmin, setIsAdmin] = useState<boolean>(() => {
- return !!localStorage.getItem(ADMIN_KEY);
- });
+  const [authLevel, setAuthLevel] = useState<string | null>(() => {
+    return localStorage.getItem(AUTH_KEY);
+  });
 
- useEffect(() => {
- const handleStorage = () => {
- setIsAdmin(!!localStorage.getItem(ADMIN_KEY));
- };
+  useEffect(() => {
+    const handleStorage = () => {
+      setAuthLevel(localStorage.getItem(AUTH_KEY));
+    };
 
- // Lyssna på ändringar både från andra flikar och samma flik
- window.addEventListener('storage', handleStorage);
- window.addEventListener('admin-auth-change', handleStorage);
+    // Lyssna på ändringar både från andra flikar och samma flik
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('auth-change', handleStorage);
 
- return () => {
- window.removeEventListener('storage', handleStorage);
- window.removeEventListener('admin-auth-change', handleStorage);
- };
- }, []);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('auth-change', handleStorage);
+    };
+  }, []);
 
- const verifyPassword = (password: string): boolean => {
- const correctPassword = import.meta.env.VITE_ADMIN_PASSWORD;
+  const verifyPassword = (password: string): boolean => {
+    const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD;
+    const sitePassword = import.meta.env.VITE_SITE_PASSWORD;
 
- // Kontrollera att lösenordet matchar miljövariabeln
- // Vi kollar även att env-variabeln existerar
- if (correctPassword && password === correctPassword) {
- localStorage.setItem(ADMIN_KEY, 'true');
- window.dispatchEvent(new Event('admin-auth-change'));
- return true;
- }
- return false;
- };
+    // Kontrollera admin-lösenord
+    if (adminPassword && password === adminPassword) {
+      localStorage.setItem(AUTH_KEY, 'admin');
+      setAuthLevel('admin');
+      window.dispatchEvent(new Event('auth-change'));
+      return true;
+    }
 
- const logout = () => {
- localStorage.removeItem(ADMIN_KEY);
- window.dispatchEvent(new Event('admin-auth-change'));
- };
+    // Kontrollera sajt-lösenord
+    if (sitePassword && password === sitePassword) {
+      // Om vi redan är admin, nedgradera inte
+      if (authLevel !== 'admin') {
+        localStorage.setItem(AUTH_KEY, 'user');
+        setAuthLevel('user');
+        window.dispatchEvent(new Event('auth-change'));
+      }
+      return true;
+    }
 
- return { isAdmin, verifyPassword, logout };
+    return false;
+  };
+
+  const logout = () => {
+    localStorage.removeItem(AUTH_KEY);
+    setAuthLevel(null);
+    window.dispatchEvent(new Event('auth-change'));
+  };
+
+  const isAdmin = authLevel === 'admin';
+  const isAuthenticated = !!authLevel;
+
+  return { isAdmin, isAuthenticated, verifyPassword, logout };
 };

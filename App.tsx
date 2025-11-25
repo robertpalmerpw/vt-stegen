@@ -9,7 +9,7 @@ import { useAdmin } from './hooks/useAdmin';
 import { getPlayers, getMatches, addMatch, removePlayer, removeMatch, updatePlayer, addPlayer } from './services/database';
 import { Player, Match } from './types';
 import { generateMatchCommentary } from './services/geminiService';
-import { Trophy, Loader2, Lock, Unlock } from 'lucide-react';
+import { Trophy, Loader2, Lock, Unlock, LogOut } from 'lucide-react';
 
 function App() {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -17,9 +17,11 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
-  const { isAdmin } = useAdmin();
+  const { isAdmin, isAuthenticated, logout } = useAdmin();
 
   const refreshData = useCallback(async () => {
+    if (!isAuthenticated) return;
+    
     try {
       const [fetchedPlayers, fetchedMatches] = await Promise.all([
         getPlayers(),
@@ -33,11 +35,15 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    refreshData();
-  }, [refreshData]);
+    if (isAuthenticated) {
+      refreshData();
+    } else {
+      setLoading(false);
+    }
+  }, [refreshData, isAuthenticated]);
 
   const handleRegisterMatch = async (winnerId: string, loserId: string, winnerScore: number, loserScore: number) => {
     setRegistering(true);
@@ -121,6 +127,17 @@ function App() {
     }
   };
 
+  // Om inte inloggad, visa endast inloggningsskärmen
+  if (!isAuthenticated) {
+    return (
+      <AdminLogin 
+        isOpen={true} 
+        onClose={() => {}} 
+        isGlobal={true} 
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -151,13 +168,19 @@ function App() {
           
           <div className="flex items-center gap-2">
             {isAdmin ? (
-              <button 
-                className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors"
-                onClick={() => setIsLoginOpen(true)} 
-              >
-                <Unlock className="w-3 h-3" />
-                Admin
-              </button>
+              <>
+                <span className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
+                  <Unlock className="w-3 h-3" />
+                  Admin
+                </span>
+                <button 
+                  onClick={logout}
+                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                  title="Logga ut"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
+              </>
             ) : (
               <button 
                 onClick={() => setIsLoginOpen(true)}
