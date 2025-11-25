@@ -268,7 +268,7 @@ function App() {
  </main>
 
  <footer className="py-8 text-center text-slate-400 text-sm">
- <p>© 2025 Pingisligan</p>
+ <p>© 2025-2026 VT-Stege - vid tekniska problem maila robert.palmer@vasttrafik.se</p>
  </footer>
  </div>
  );
