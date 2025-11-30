@@ -24,7 +24,7 @@ export const generateMatchCommentary = async (
       const wStreak = context.winnerStreak
         ? (context.winnerStreak > 0 ? `${context.winnerStreak} raka vinster` : `${Math.abs(context.winnerStreak)} raka förluster`)
         : "okänd svit";
-      
+
       const lStreak = context.loserStreak
         ? (context.loserStreak > 0 ? `${context.loserStreak} raka vinster` : `${Math.abs(context.loserStreak)} raka förluster`)
         : "okänd svit";
@@ -48,7 +48,8 @@ ${isRankSwap ? "OBS: Detta var en SKRÄLL! Vinnaren klättrade förbi förlorare
 ${contextInfo}
 
 Instruktioner:
-- Använd statistiken ovan för att ge kommentaren mer färg (t.ex. nämn om någon är 'het' eller 'iskall').
+- Använd statistiken ovan för att ge kommentaren mer färg.
+- Var kreativ.
 - Var inte för formell, använd gärna kontorshumor.
 - Använd emojis för att förstärka känslan.
 `;

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Player, Match } from '../types';
+import { compressEloScores } from '../services/database';
 import { Trophy, TrendingUp, TrendingDown, Minus, Trash2, Medal, ChevronDown, ChevronUp, Swords, Zap } from 'lucide-react';
 import { useAdmin } from '../hooks/useAdmin';
 
@@ -7,11 +8,13 @@ interface RankingListProps {
   players: Player[];
   matches: Match[];
   onRemovePlayer: (id: string) => void;
+  onBookingRequest: (player: Player) => void;
 }
 
-export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRemovePlayer }) => {
+export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRemovePlayer, onBookingRequest }) => {
   const { isAdmin } = useAdmin();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'elo' | 'ladder'>('ladder');
 
   const getStreakIcon = (streak: number) => {
     if (streak > 0) return <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />;
@@ -48,7 +51,7 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
 
   const getPlayerMatches = (playerId: string) => {
     return matches
-      .filter(m => m.winnerId === playerId || m.loserId === playerId)
+      .filter(m => (m.winnerId === playerId || m.loserId === playerId) && (m.status === 'completed' || !m.status))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   };
 
@@ -58,20 +61,68 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
     return new Date(playerMatches[0].date);
   };
 
+  const sortedPlayers = [...players].sort((a, b) => {
+    if (viewMode === 'elo') {
+      return (b.elo || 1200) - (a.elo || 1200);
+    } else {
+      return (a.rank || 9999) - (b.rank || 9999);
+    }
+  });
+
   return (
     <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
-      <div className="p-6 border-b border-slate-50 flex justify-between items-end bg-gradient-to-r from-white to-slate-50/50">
+      <div className="p-6 border-b border-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 bg-gradient-to-r from-white to-slate-50/50">
         <div>
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             <Trophy className="w-5 h-5 text-emerald-500" />
             Tabell
           </h2>
-          <p className="text-xs text-slate-500 mt-1 font-medium">Rankad efter ELO</p>
+          <p className="text-xs text-slate-500 mt-1 font-medium">
+            {viewMode === 'elo' ? 'Rankad efter Poäng' : 'Rankad efter Stegen-placering'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <button
+              onClick={async () => {
+                if (window.confirm('Detta kommer att minska poängskillnaderna mellan alla spelare med 50%. Ordningen behålls. Är du säker?')) {
+                  await compressEloScores();
+                  window.location.reload();
+                }
+              }}
+              className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+              title="Komprimera poäng (Admin)"
+            >
+              <Zap className="w-4 h-4" />
+            </button>
+          )}
+
+          <div className="flex bg-slate-100 p-1 rounded-lg">
+            <button
+              onClick={() => setViewMode('ladder')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${viewMode === 'ladder'
+                ? 'bg-white text-emerald-600 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+                }`}
+            >
+              Stegen
+            </button>
+            <button
+              onClick={() => setViewMode('elo')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${viewMode === 'elo'
+                ? 'bg-white text-emerald-600 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+                }`}
+            >
+              Poäng
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="divide-y divide-slate-50">
-        {[...players].sort((a, b) => b.elo - a.elo).map((player, index) => {
+        {sortedPlayers.map((player, index) => {
           const totalGames = player.wins + player.losses;
           const winRate = totalGames > 0 ? Math.round((player.wins / totalGames) * 100) : 0;
           const isExpanded = expandedId === player.id;
@@ -81,15 +132,15 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
 
           return (
             <div key={player.id} className="transition-colors group">
-              <div 
+              <div
                 onClick={() => toggleExpand(player.id)}
                 className={`p-4 flex items-center gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
               >
                 <div className="flex-shrink-0">
                   {getRankBadge(currentRank)}
                 </div>
-                
-                <img 
+
+                <img
                   src={`https://ui-avatars.com/api/?name=${encodeURIComponent(player.name)}&background=random&color=fff&size=80&font-size=0.4`}
                   alt={player.name}
                   className="w-10 h-10 rounded-full object-cover ring-2 ring-white shadow-sm"
@@ -101,10 +152,15 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
                     {isExpanded ? <ChevronUp className="w-3 h-3 text-slate-400" /> : <ChevronDown className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
                   </h3>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <div className="flex items-center gap-1 bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md border border-amber-100">
+                    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md border ${viewMode === 'elo' ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                       <Zap className="w-3 h-3" />
                       <span className="text-[10px] font-bold">{player.elo || 1200}</span>
                     </div>
+                    {viewMode === 'elo' && (
+                      <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
+                        Stegen: #{player.rank}
+                      </span>
+                    )}
                     <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
                       {player.wins}W - {player.losses}L
                     </span>
@@ -126,24 +182,35 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
                   </span>
                 </div>
 
-                <div className="hidden sm:block w-24">
+                <div className="hidden sm:block w-24 mr-4">
                   <div className="flex justify-between text-[10px] text-slate-400 mb-1 font-medium">
                     <span>Win Rate</span>
                     <span>{winRate}%</span>
                   </div>
                   <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className={`h-full rounded-full transition-all duration-500 ${winRate >= 50 ? 'bg-emerald-500' : 'bg-amber-500'}`}
                       style={{ width: `${winRate}%` }}
                     ></div>
                   </div>
                 </div>
 
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onBookingRequest(player);
+                  }}
+                  className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-all"
+                  title="Utmana"
+                >
+                  <Swords className="w-5 h-5" />
+                </button>
+
                 {isAdmin && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if(window.confirm(`Ta bort ${player.name}? Detta går inte att ångra.`)) {
+                      if (window.confirm(`Ta bort ${player.name}? Detta går inte att ångra.`)) {
                         onRemovePlayer(player.id);
                       }
                     }}
@@ -156,52 +223,54 @@ export const RankingList: React.FC<RankingListProps> = ({ players, matches, onRe
 
               {isExpanded && (
                 <div className="bg-slate-50 px-4 pb-4 pt-0 animate-in slide-in-from-top-2 duration-200">
-                  <div className="pl-[4.5rem]">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                      <Swords className="w-3 h-3" />
-                      Senaste matcher
-                    </div>
-                    
-                    {recentMatches.length > 0 ? (
-                      <div className="space-y-2">
-                        {recentMatches.map((match) => {
-                          const isWinner = match.winnerId === player.id;
-                          const opponentId = isWinner ? match.loserId : match.winnerId;
-                          const opponent = players.find(p => p.id === opponentId);
-                          const opponentName = opponent ? opponent.name : 'Okänd spelare';
-                          
-                          const eloDiff = match.eloChange ? (isWinner ? `+${match.eloChange}` : `-${match.eloChange}`) : null;
-                          const playerScore = isWinner ? match.winnerScore : match.loserScore;
-                          const opponentScore = isWinner ? match.loserScore : match.winnerScore;
+                  <div className="pl-[4.5rem] space-y-4">
+                    <div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                        <Swords className="w-3 h-3" />
+                        Senaste matcher
+                      </div>
 
-                          return (
-                            <div key={match.id} className="flex items-center justify-between bg-white border border-slate-100 p-2 rounded-lg text-sm">
-                              <div className="flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${isWinner ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-                                <span className="text-slate-500 text-xs">
-                                  {new Date(match.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}
-                                </span>
-                                <span className="font-medium text-slate-700">
-                                  vs {opponentName}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                {eloDiff && (
-                                  <span className={`text-xs font-bold ${isWinner ? 'text-emerald-600' : 'text-red-500'}`}>
-                                    {eloDiff} p
+                      {recentMatches.length > 0 ? (
+                        <div className="space-y-2">
+                          {recentMatches.map((match) => {
+                            const isWinner = match.winnerId === player.id;
+                            const opponentId = isWinner ? match.loserId : match.winnerId;
+                            const opponent = players.find(p => p.id === opponentId);
+                            const opponentName = opponent ? opponent.name : 'Okänd spelare';
+
+                            const eloDiff = match.eloChange ? (isWinner ? `+${match.eloChange}` : `-${match.eloChange}`) : null;
+                            const playerScore = isWinner ? match.winnerScore : match.loserScore;
+                            const opponentScore = isWinner ? match.loserScore : match.winnerScore;
+
+                            return (
+                              <div key={match.id} className="flex items-center justify-between bg-white border border-slate-100 p-2 rounded-lg text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full ${isWinner ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                                  <span className="text-slate-500 text-xs">
+                                    {new Date(match.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}
                                   </span>
-                                )}
-                                <div className="font-mono font-bold text-slate-800">
-                                  {playerScore} - {opponentScore}
+                                  <span className="font-medium text-slate-700">
+                                    vs {opponentName}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  {eloDiff && (
+                                    <span className={`text-xs font-bold ${isWinner ? 'text-emerald-600' : 'text-red-500'}`}>
+                                      {eloDiff} p
+                                    </span>
+                                  )}
+                                  <div className="font-mono font-bold text-slate-800">
+                                    {playerScore} - {opponentScore}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400 italic">Inga spelade matcher än.</p>
-                    )}
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">Inga spelade matcher än.</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
